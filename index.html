@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Letter UP - Jeu en ligne</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg-color: #e5f1ed;
+      --player1-color: #2a9d8f;
+      --player2-color: #e76f51;
+      --traverse-color: #4a4e69;
+    }
+
+    * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background: linear-gradient(135deg, var(--bg-color), #e8edf9 55%, #f9e6ed); min-height: 100vh; margin: 0; padding: 10px; text-align: center; color: #333; }
+    
+    .hidden { display: none !important; }
+    .screen { max-width: 620px; margin: 0 auto; background: #eef6f1; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    
+    header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
+    .header-start { display: flex; align-items: center; gap: 10px; }
+    .home-btn { width: 36px; height: 36px; padding: 0; border: none; border-radius: 6px; background: #d7e9df; color: #234b39; font-size: 1.4rem; cursor: pointer; }
+    .share-btn { background: #457b9d; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+    
+    /* Plateau avec image de fond officielle */
+    .board-container { 
+      display: grid; 
+      grid-template-columns: 11% repeat(7, minmax(0, 1fr)) 10%;
+      grid-template-rows: 10.4% repeat(7, minmax(0, 1fr)) 10.7%;
+      gap: 0; 
+      margin: 15px auto; 
+      width: 100%; 
+      aspect-ratio: 1; 
+      background: url('./plateau.jpg') center/cover no-repeat;
+      background-origin: content-box;
+      border: 4px solid #d4a373;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .cell { 
+      background: transparent; 
+      border: none;
+      min-width: 0;
+      min-height: 0;
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      font-weight: bold; 
+      position: relative; 
+      cursor: pointer; 
+      user-select: none; 
+    }
+    
+    /* Zones de territoires (autour de la grille) */
+    .territory-slot { 
+      background: #e9d8a6; 
+      border-radius: 50%; 
+      border: 2px dashed #b08968; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      width: 62%;
+      height: auto;
+      aspect-ratio: 1;
+      margin: auto;
+    }
+    .peg { width: 80%; height: 80%; border-radius: 50%; box-shadow: inset 0 2px 4px rgba(0,0,0,0.4); }
+    .peg.p0 { background: var(--player1-color); }
+    .peg.p1 { background: var(--player2-color); }
+    
+    /* Tuiles et empilements */
+    .tile { 
+      background: #faedcd; 
+      border: 2px solid #d4a373; 
+      border-radius: 6px; 
+      font-weight: bold; 
+      font-size: 1.8rem; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      width: 90%; 
+      height: 90%; 
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3); 
+      position: relative; 
+      z-index: 2;
+    }
+    .tile.selected { border-color: #e63946; transform: scale(1.06); }
+    .cell > .tile { width: 100%; height: 100%; border-radius: 2px; box-shadow: inset 0 0 3px rgba(0,0,0,0.2); }
+    .tile.traverse { background: var(--traverse-color); color: white; border-color: #22223b; }
+    .tile-height { position: absolute; bottom: 1px; right: 3px; font-size: 0.9rem; color: #444; background: rgba(255,255,255,0.7); padding: 0 2px; border-radius: 3px; }
+    
+    /* Support de tuiles */
+    .rack-container { background: #d8b48f; padding: 10px; border-radius: 8px; margin: 15px 0; }
+    .rack { display: flex; gap: 8px; justify-content: center; height: 50px; }
+    .rack-slot { width: 45px; max-width: calc((100% - 40px) / 6); aspect-ratio: 1; height: auto; align-self: flex-start; background: rgba(0,0,0,0.1); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+    
+    .status-bar { margin: 10px 0; font-weight: bold; padding: 8px; border-radius: 6px; background: #edf6f9; }
+    .status-bar.is-my-turn { background: #7aee59; color: #153d16; box-shadow: inset 0 0 0 2px #38a92e; }
+    .btn-group { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    button.action-btn { padding: 10px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; background: #2a9d8f; color: white; }
+    button.action-btn:disabled { background: #ccc; cursor: not-allowed; }
+    button.cancel-btn { background: #e76f51; }
+    button.secondary-btn { background: #e9c46a; color: #333; }
+    
+    .bag-info { font-size: 0.9rem; color: #555; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+
+  <!-- ÉCRAN D'ACCUEIL -->
+  <div id="home-screen" class="screen">
+    <h1>Letter UP</h1>
+    <p>Jeu de mots et de conquête de territoires</p>
+    <div style="display:flex; flex-direction:column; gap:12px; margin-top:30px;">
+      <button id="btn-new-game" class="action-btn" onclick="startNewGame()">Nouvelle partie</button>
+      <button id="btn-resume-game" class="action-btn secondary-btn hidden" onclick="resumeGame()">Reprendre la partie en cours</button>
+    </div>
+  </div>
+
+  <!-- ÉCRAN DE JEU -->
+  <div id="game-screen" class="screen hidden">
+    <header>
+      <div class="header-start">
+        <button class="home-btn" onclick="returnHome()" title="Revenir à l'accueil" aria-label="Revenir à l'accueil">&#8592;</button>
+        <div class="bag-info">👜 Sac : <span id="bag-count">60</span> tuiles</div>
+      </div>
+      <button class="share-btn" onclick="shareGameLink()">📋 Copier lien de partage</button>
+    </header>
+
+    <div class="status-bar" id="game-status">Attente des joueurs...</div>
+
+    <!-- Plateau de jeu avec fond officiel -->
+    <div class="board-container" id="board"></div>
+
+    <!-- Support de tuiles -->
+    <div class="rack-container">
+      <div style="font-size: 0.8rem; margin-bottom: 4px;">Tuiles lettres</div>
+      <div class="rack" id="player-rack"></div>
+    </div>
+
+    <!-- Zone de mise de côté (Renouvellement) -->
+    <div id="discard-zone-container" class="hidden" style="margin-bottom: 10px;">
+      <div style="font-size: 0.8rem; margin-bottom: 4px;">Tuiles à remettre au sac</div>
+      <div class="rack" id="discard-rack"></div>
+    </div>
+
+    <!-- Actions du jeu -->
+    <div class="btn-group">
+      <button id="btn-play-word" class="action-btn" onclick="selectAction('PLAY')">Jouer un mot</button>
+      <button id="btn-renew" class="action-btn secondary-btn" onclick="selectAction('RENEW')">Renouveler ses lettres</button>
+      <button id="btn-validate" class="action-btn hidden" onclick="validateTurn()">Valider</button>
+      <button id="btn-cancel" class="action-btn cancel-btn hidden" onclick="cancelAction()">Annuler</button>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://ckvqujwxzlpdfwxbuqno.supabase.co";
+    const SUPABASE_KEY = "sb_publishable__8RopAM6dop73hqiygWiTQ_PH9riFog";
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const LETTER_DISTRIBUTION = {
+      'A': 8, 'B': 1, 'C': 2, 'D': 1, 'E': 8, 'F': 1, 'G': 1, 'H': 1, 'I': 5,
+      'J': 1, 'K': 1, 'L': 2, 'M': 2, 'N': 2, 'O': 5, 'P': 2, 'Q': 1, 'R': 3,
+      'S': 2, 'T': 2, 'U': 3, 'V': 1, 'W': 1, 'X': 1, 'Y': 1, 'Z': 1, '_': 1
+    };
+    const VOWELS = new Set(['A', 'E', 'I', 'O', 'U', 'Y']);
+
+    let gameId = null;
+    let playerId = null;
+    let channel = null;
+    
+    function createEmptyGameState() {
+      return {
+      board: Array(7).fill(null).map(() => Array(7).fill(null).map(() => [])),
+      traverses: Array(7).fill(null).map(() => Array(7).fill(false)),
+      territories: { top: Array(7).fill(null), bottom: Array(7).fill(null), left: Array(7).fill(null), right: Array(7).fill(null) },
+      bag: [],
+      racks: [[], []],
+      scores: [0, 0],
+      activePlayer: 0,
+      started: false,
+      firstMoveDone: false,
+      winner: null,
+      revision: 0
+      };
+    }
+
+    let gameState = createEmptyGameState();
+
+    let currentAction = null;
+    let selectedRackIndex = null;
+    let turnPlacements = [];
+    let turnDiscards = [];
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramGame = urlParams.get('game');
+      const savedGame = localStorage.getItem('letterup_last_game');
+
+      if (savedGame) {
+        document.getElementById('btn-resume-game').classList.remove('hidden');
+      }
+
+      if (paramGame) {
+        joinGame(paramGame);
+      }
+    });
+
+    function generateBag() {
+      const bag = [];
+      for (const [letter, count] of Object.entries(LETTER_DISTRIBUTION)) {
+        for (let i = 0; i < count; i++) bag.push(letter);
+      }
+      return shuffle(bag);
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function isAllVowelsOrConsonants(hand) {
+      const letters = hand.filter(l => l !== '_');
+      const vowCount = letters.filter(l => VOWELS.has(l)).length;
+      return vowCount === 0 || vowCount === letters.length;
+    }
+
+    function drawValidHand(bag) {
+      let hand = [];
+      do {
+        if (hand.length > 0) bag.push(...hand);
+        shuffle(bag);
+        hand = bag.splice(0, 6);
+      } while (isAllVowelsOrConsonants(hand));
+      return hand;
+    }
+
+    function startNewGame() {
+      gameId = Math.random().toString(36).substring(2, 9);
+      playerId = 0;
+      
+      const bag = generateBag();
+      const rack0 = drawValidHand(bag);
+      const rack1 = drawValidHand(bag);
+      const firstPlayer = Math.floor(Math.random() * 2);
+
+      gameState = {
+        board: Array(7).fill(null).map(() => Array(7).fill(null).map(() => [])),
+        traverses: Array(7).fill(null).map(() => Array(7).fill(false)),
+        territories: { top: Array(7).fill(null), bottom: Array(7).fill(null), left: Array(7).fill(null), right: Array(7).fill(null) },
+        bag: bag,
+        racks: [rack0, rack1],
+        scores: [0, 0],
+        activePlayer: firstPlayer,
+        started: true,
+        firstMoveDone: false,
+        winner: null,
+        revision: 0
+      };
+
+      updateURLAndStorage();
+      saveGameState();
+      setupSupabaseChannel(true);
+      showGameScreen();
+    }
+
+    function resumeGame() {
+      const savedGame = localStorage.getItem('letterup_last_game');
+      if (savedGame) {
+        joinGame(savedGame);
+      }
+    }
+
+    function joinGame(id) {
+      gameId = id;
+      const savedPlayer = localStorage.getItem('letterup_last_game') === id
+        ? localStorage.getItem('letterup_player_id') : null;
+      playerId = savedPlayer !== null ? parseInt(savedPlayer, 10) : 1;
+      gameState = createEmptyGameState();
+      try {
+        const saved = JSON.parse(localStorage.getItem(`letterup_game_${id}`));
+        if (saved && saved.state && saved.state.started) {
+          gameState = saved.state;
+          playerId = saved.playerId;
+        }
+      } catch (error) {
+        console.warn('Sauvegarde locale illisible :', error);
+      }
+      updateURLAndStorage();
+      setupSupabaseChannel();
+      showGameScreen();
+    }
+
+    function saveGameState() {
+      if (!gameId || !gameState.started) return;
+      localStorage.setItem(`letterup_game_${gameId}`, JSON.stringify({ playerId, state: gameState }));
+    }
+
+    function returnHome() {
+      saveGameState();
+      cancelAction();
+      document.getElementById('game-screen').classList.add('hidden');
+      document.getElementById('home-screen').classList.remove('hidden');
+      document.getElementById('btn-resume-game').classList.toggle('hidden', !localStorage.getItem('letterup_last_game'));
+      const homeUrl = new URL(window.location.href);
+      homeUrl.searchParams.delete('game');
+      window.history.replaceState({}, '', homeUrl);
+    }
+
+    function updateURLAndStorage() {
+      const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?game=' + gameId;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+      localStorage.setItem('letterup_last_game', gameId);
+      localStorage.setItem('letterup_player_id', playerId);
+    }
+
+    function showGameScreen() {
+      document.getElementById('home-screen').classList.add('hidden');
+      document.getElementById('game-screen').classList.remove('hidden');
+      cancelAction();
+    }
+
+    function setupSupabaseChannel(isNewGame = false) {
+      if (channel) supabaseClient.removeChannel(channel);
+      const subscribedGameId = gameId;
+
+      channel = supabaseClient.channel(`game_${gameId}`, {
+        config: { broadcast: { self: true } }
+      });
+
+      channel
+        .on('broadcast', { event: 'state_update' }, ({ payload }) => {
+          if (gameId !== subscribedGameId || !payload.started) return;
+          if (gameState.started && (payload.revision || 0) < (gameState.revision || 0)) return;
+          gameState = payload;
+          saveGameState();
+          renderBoard();
+          renderRack();
+          updateStatus();
+        })
+        .on('broadcast', { event: 'request_state' }, () => {
+          if (gameId === subscribedGameId && gameState.started) broadcastState();
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED' && gameId === subscribedGameId) {
+            if (isNewGame) {
+              broadcastState();
+            } else {
+              channel.send({ type: 'broadcast', event: 'request_state', payload: {} });
+            }
+          }
+        });
+    }
+
+    function broadcastState() {
+      saveGameState();
+      if (channel && gameState.started) {
+        channel.send({
+          type: 'broadcast',
+          event: 'state_update',
+          payload: gameState
+        });
+      }
+    }
+
+    function renderBoard() {
+      const boardEl = document.getElementById('board');
+      boardEl.innerHTML = '';
+      document.getElementById('bag-count').innerText = gameState.bag.length;
+
+      for (let r = -1; r <= 7; r++) {
+        for (let c = -1; c <= 7; c++) {
+          const isCorner = (r === -1 || r === 7) && (c === -1 || c === 7);
+          if (isCorner) {
+            boardEl.appendChild(document.createElement('div'));
+            continue;
+          }
+
+          if (r === -1 || r === 7 || c === -1 || c === 7) {
+            const slot = document.createElement('div');
+            slot.className = 'territory-slot';
+            let owner = null;
+
+            if (r === -1) owner = gameState.territories.top[c];
+            else if (r === 7) owner = gameState.territories.bottom[c];
+            else if (c === -1) owner = gameState.territories.left[r];
+            else if (c === 7) owner = gameState.territories.right[r];
+
+            if (owner !== null) {
+              const peg = document.createElement('div');
+              peg.className = `peg p${owner}`;
+              slot.appendChild(peg);
+            }
+            boardEl.appendChild(slot);
+            continue;
+          }
+
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+
+          const stack = gameState.board[r][c];
+          const tempPlacement = turnPlacements.find(p => p.r === r && p.c === c);
+
+          if (tempPlacement) {
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.innerText = tempPlacement.letter;
+            cell.appendChild(tile);
+          } else if (stack.length > 0) {
+            const top = stack[stack.length - 1];
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            if (gameState.traverses[r][c]) tile.classList.add('traverse');
+            tile.innerText = top.letter;
+
+            if (stack.length > 1) {
+              const heightTag = document.createElement('span');
+              heightTag.className = 'tile-height';
+              heightTag.innerText = stack.length;
+              tile.appendChild(heightTag);
+            }
+            cell.appendChild(tile);
+          }
+
+          cell.onclick = () => handleCellClick(r, c);
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    function renderRack() {
+      const rackEl = document.getElementById('player-rack');
+      rackEl.innerHTML = '';
+
+      const myHand = gameState.racks[playerId] || [];
+      myHand.forEach((letter, index) => {
+        const slot = document.createElement('div');
+        slot.className = 'rack-slot';
+
+        const placed = turnPlacements.some(p => p.originalRackIndex === index);
+        const discarded = turnDiscards.some(d => d.originalRackIndex === index);
+
+        if (!placed && !discarded && letter) {
+          const tile = document.createElement('div');
+          tile.className = 'tile';
+          if (selectedRackIndex === index) tile.classList.add('selected');
+          tile.innerText = letter;
+          tile.onclick = () => handleRackTileClick(index);
+          slot.appendChild(tile);
+        }
+
+        rackEl.appendChild(slot);
+      });
+
+      const discardRackEl = document.getElementById('discard-rack');
+      discardRackEl.innerHTML = '';
+      turnDiscards.forEach((d) => {
+        const slot = document.createElement('div');
+        slot.className = 'rack-slot';
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.innerText = d.letter;
+        slot.appendChild(tile);
+        discardRackEl.appendChild(slot);
+      });
+    }
+
+    function selectAction(action) {
+      if (!gameState.started || gameState.activePlayer !== playerId) return;
+      currentAction = action;
+      turnPlacements = [];
+      turnDiscards = [];
+      selectedRackIndex = null;
+
+      document.getElementById('btn-play-word').classList.add('hidden');
+      document.getElementById('btn-renew').classList.add('hidden');
+      document.getElementById('btn-validate').classList.remove('hidden');
+      document.getElementById('btn-cancel').classList.remove('hidden');
+
+      if (action === 'RENEW') {
+        document.getElementById('discard-zone-container').classList.remove('hidden');
+      }
+
+      renderRack();
+      renderBoard();
+      updateStatus();
+    }
+
+    function cancelAction() {
+      currentAction = null;
+      turnPlacements = [];
+      turnDiscards = [];
+      selectedRackIndex = null;
+
+      document.getElementById('btn-play-word').classList.remove('hidden');
+      document.getElementById('btn-renew').classList.remove('hidden');
+      document.getElementById('btn-validate').classList.add('hidden');
+      document.getElementById('btn-cancel').classList.add('hidden');
+      document.getElementById('discard-zone-container').classList.add('hidden');
+
+      renderRack();
+      renderBoard();
+      updateStatus();
+    }
+
+    function handleRackTileClick(index) {
+      if (!currentAction) return;
+      
+      if (currentAction === 'RENEW') {
+        const letter = gameState.racks[playerId][index];
+        turnDiscards.push({ letter, originalRackIndex: index });
+        renderRack();
+      } else if (currentAction === 'PLAY') {
+        selectedRackIndex = (selectedRackIndex === index) ? null : index;
+        renderRack();
+      }
+    }
+
+    function handleCellClick(r, c) {
+      if (currentAction !== 'PLAY' || selectedRackIndex === null) return;
+
+      if (gameState.traverses[r][c]) {
+        alert("Impossible de poser une tuile sur une TRAVERSE !");
+        return;
+      }
+
+      const currentStack = gameState.board[r][c];
+      const tempPlacementIndex = turnPlacements.findIndex(p => p.r === r && p.c === c);
+      
+      if (currentStack.length >= 3 && tempPlacementIndex === -1) {
+        alert("Une case ne peut pas contenir plus de 3 tuiles !");
+        return;
+      }
+
+      let letter = gameState.racks[playerId][selectedRackIndex];
+
+      if (letter === '_') {
+        const choice = prompt("Choisissez la lettre pour le Joker (A-Z) :") || 'A';
+        letter = choice.toUpperCase().substring(0, 1);
+      }
+
+      if (currentStack.length > 0 && tempPlacementIndex === -1) {
+        const topLetter = currentStack[currentStack.length - 1].letter;
+        if (topLetter === letter) {
+          alert("La lettre posée doit être différente de celle recouverte !");
+          return;
+        }
+      }
+
+      if (tempPlacementIndex !== -1) {
+        turnPlacements[tempPlacementIndex] = { r, c, letter, originalRackIndex: selectedRackIndex };
+      } else {
+        turnPlacements.push({ r, c, letter, originalRackIndex: selectedRackIndex });
+      }
+
+      selectedRackIndex = null;
+      renderRack();
+      renderBoard();
+    }
+
+    function validateTurn() {
+      if (gameState.activePlayer !== playerId) return;
+
+      if (currentAction === 'RENEW') {
+        if (turnDiscards.length === 0) {
+          alert("Sélectionnez au moins une lettre à renouveler.");
+          return;
+        }
+
+        const indicesToRemove = turnDiscards.map(d => d.originalRackIndex).sort((a,b) => b-a);
+        indicesToRemove.forEach(i => gameState.racks[playerId].splice(i, 1));
+
+        const needed = 6 - gameState.racks[playerId].length;
+        const drawn = gameState.bag.splice(0, Math.min(needed, gameState.bag.length));
+        gameState.racks[playerId].push(...drawn);
+
+        turnDiscards.forEach(d => gameState.bag.push(d.letter));
+        shuffle(gameState.bag);
+
+        endTurn();
+
+      } else if (currentAction === 'PLAY') {
+        if (turnPlacements.length === 0) {
+          alert("Placez au moins une lettre sur le plateau.");
+          return;
+        }
+
+        if (!gameState.firstMoveDone) {
+          const touchesCenter = turnPlacements.some(p => p.r === 3 && p.c === 3);
+          if (!touchesCenter) {
+            alert("Le premier mot doit obligatoirement recouvrer la case centrale Soleil !");
+            return;
+          }
+        }
+
+        turnPlacements.forEach(p => {
+          gameState.board[p.r][p.c].push({ letter: p.letter, player: playerId });
+        });
+
+        const indicesToRemove = turnPlacements.map(p => p.originalRackIndex).sort((a,b) => b-a);
+        indicesToRemove.forEach(i => gameState.racks[playerId].splice(i, 1));
+
+        const needed = 6 - gameState.racks[playerId].length;
+        const drawn = gameState.bag.splice(0, Math.min(needed, gameState.bag.length));
+        gameState.racks[playerId].push(...drawn);
+
+        gameState.firstMoveDone = true;
+
+        evaluateTerritoriesAndTraverses(turnPlacements);
+        checkGameOver();
+        endTurn();
+      }
+    }
+
+    function evaluateTerritoriesAndTraverses(placements) {
+      placements.forEach(p => {
+        const r = p.r;
+        const c = p.c;
+
+        let rowFull = true;
+        let colFull = true;
+        for (let i = 0; i < 7; i++) {
+          if (gameState.board[r][i].length === 0) rowFull = false;
+          if (gameState.board[i][c].length === 0) colFull = false;
+        }
+
+        if (rowFull) {
+          for (let i = 0; i < 7; i++) gameState.traverses[r][i] = true;
+          gameState.territories.left[r] = playerId;
+          gameState.territories.right[r] = playerId;
+        }
+
+        if (colFull) {
+          for (let i = 0; i < 7; i++) gameState.traverses[i][c] = true;
+          gameState.territories.top[c] = playerId;
+          gameState.territories.bottom[c] = playerId;
+        }
+
+        if (r === 0) gameState.territories.top[c] = playerId;
+        if (r === 6) gameState.territories.bottom[c] = playerId;
+        if (c === 0) gameState.territories.left[r] = playerId;
+        if (c === 6) gameState.territories.right[r] = playerId;
+      });
+
+      let count0 = 0, count1 = 0;
+      ['top', 'bottom', 'left', 'right'].forEach(side => {
+        gameState.territories[side].forEach(p => {
+          if (p === 0) count0++;
+          if (p === 1) count1++;
+        });
+      });
+      gameState.scores = [count0, count1];
+    }
+
+    function checkGameOver() {
+      if (gameState.scores[0] >= 6) gameState.winner = 0;
+      else if (gameState.scores[1] >= 6) gameState.winner = 1;
+
+      if (gameState.bag.length === 0) {
+        if (gameState.scores[0] > gameState.scores[1]) gameState.winner = 0;
+        else if (gameState.scores[1] > gameState.scores[0]) gameState.winner = 1;
+        else gameState.winner = 'TIE';
+      }
+    }
+
+    function endTurn() {
+      gameState.activePlayer = gameState.activePlayer === 0 ? 1 : 0;
+      gameState.revision = (gameState.revision || 0) + 1;
+      cancelAction();
+      broadcastState();
+    }
+
+    function updateStatus() {
+      const statusEl = document.getElementById('game-status');
+      const isMyTurn = gameState.started && gameState.winner === null && gameState.activePlayer === playerId;
+      statusEl.classList.toggle('is-my-turn', isMyTurn);
+      document.getElementById('btn-play-word').disabled = !isMyTurn;
+      document.getElementById('btn-renew').disabled = !isMyTurn;
+
+      if (!gameState.started) {
+        statusEl.innerText = "Récupération de la partie : en attente de l'autre joueur...";
+        return;
+      }
+
+      if (gameState.winner !== null) {
+        if (gameState.winner === 'TIE') statusEl.innerText = "Fin de partie : Égalité parfaite !";
+        else statusEl.innerText = `🏆 Fin de partie : Joueur ${gameState.winner + 1} remporte la victoire !`;
+        return;
+      }
+
+      statusEl.innerText = isMyTurn
+        ? `🟢 C'est votre tour (Joueur ${playerId + 1})`
+        : `⏳ Tour du Joueur ${gameState.activePlayer + 1}`;
+    }
+
+    function shareGameLink() {
+      const url = window.location.href;
+      navigator.clipboard.writeText(url).then(() => {
+        alert("Lien de partage copié dans le presse-papier !");
+      });
+    }
+  </script>
+</body>
+</html>
